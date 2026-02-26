@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;700&display=swap" rel="stylesheet">
 <title>Platform Panic!</title>
 <style>
 * { margin: 0; padding: 0; }
@@ -25,7 +28,7 @@ canvas {
     background: #1e1410;
     color: #ffcc00;
     border: 2px solid #ff6600;
-    font-family: monospace;
+    font-family: 'Pixelify Sans', monospace;
     padding: 4px 6px;
     outline: none;
     box-sizing: border-box;
@@ -74,6 +77,7 @@ let names = loadNames();
 // ═══════════════════════════════════════════════════════════════
 //  CONSTANTS
 // ═══════════════════════════════════════════════════════════════
+const UI_SCALE = 1.5;
 const W = 384, H = 216;
 const WORLD_H = 2400;
 const PW = 8, PH = 10;
@@ -116,6 +120,7 @@ const rand  = (a, b) => Math.random() * (b - a) + a;
 const irand = (a, b) => Math.floor(rand(a, b + 1));
 const lerp  = (a, b, t) => a + (b - a) * t;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const uiFs = (s, base) => Math.floor(s * base * UI_SCALE);
 
 function hsl(h, s, l) {
     s /= 100; l /= 100;
@@ -660,7 +665,7 @@ function hideConfigInputs() {
 function positionConfigInputs() {
     const rect = canvas.getBoundingClientRect();
     const s = rect.width / W;
-    const fs = Math.max(10, Math.floor(s * 3.2));
+    const fs = Math.max(10, uiFs(s, 3.2));
 
     nameInput.style.left = (rect.left + 62 * s) + 'px';
     nameInput.style.top = (rect.top + 142 * s) + 'px';
@@ -891,8 +896,8 @@ function render() {
 function drawNameLabels(ctx, s, camY) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    const fs = Math.max(9, Math.floor(s * 3.5));
-    ctx.font = `bold ${fs}px monospace`;
+    const fs = Math.max(9, uiFs(s, 3.5));
+    ctx.font = `bold ${fs}px 'Pixelify Sans',monospace`;
 
     for (const p of players) {
         if (!p.alive) continue;
@@ -911,20 +916,20 @@ function drawTitleScreen(ctx, s) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.textAlign = 'center';
 
-    const t1 = Math.floor(s * 16);
-    ctx.font = `bold ${t1}px monospace`;
+    const t1 = uiFs(s, 16);
+    ctx.font = `bold ${t1}px 'Pixelify Sans',monospace`;
     ctx.fillStyle = '#ff6600';
     ctx.fillText('PLATFORM', canvas.width / 2, canvas.height * 0.22);
     ctx.fillStyle = '#ffcc00';
     ctx.fillText('PANIC!', canvas.width / 2, canvas.height * 0.22 + t1 * 1.15);
 
-    const sub = Math.floor(s * 4);
-    ctx.font = `${sub}px monospace`;
+    const sub = uiFs(s, 4);
+    ctx.font = `${sub}px 'Pixelify Sans',monospace`;
     ctx.fillStyle = '#aaa';
     ctx.fillText('Who will facilitate next?', canvas.width / 2, canvas.height * 0.42);
 
-    const ls = Math.floor(s * 3.5);
-    ctx.font = `bold ${ls}px monospace`;
+    const ls = uiFs(s, 3.5);
+    ctx.font = `bold ${ls}px 'Pixelify Sans',monospace`;
     const cols = Math.min(3, Math.ceil(names.length / 10));
     const rows = Math.ceil(names.length / cols);
     const colW = canvas.width / (cols + 1);
@@ -936,8 +941,8 @@ function drawTitleScreen(ctx, s) {
         ctx.fillText(names[i], colW * (col + 1), canvas.height * 0.50 + row * ls * 1.8);
     }
 
-    const editFs = Math.floor(s * 3.2);
-    ctx.font = `bold ${editFs}px monospace`;
+    const editFs = uiFs(s, 3.2);
+    ctx.font = `bold ${editFs}px 'Pixelify Sans',monospace`;
     const editY = canvas.height * 0.855;
     const editW = ctx.measureText('[ EDIT PLAYERS ]').width;
     ctx.fillStyle = '#886633';
@@ -948,7 +953,7 @@ function drawTitleScreen(ctx, s) {
     };
 
     if (Math.floor(frame / 30) % 2 === 0) {
-        ctx.font = `bold ${Math.floor(s * 5)}px monospace`;
+        ctx.font = `bold ${uiFs(s, 5)}px 'Pixelify Sans',monospace`;
         ctx.fillStyle = '#fff';
         ctx.fillText('CLICK TO START', canvas.width / 2, canvas.height * 0.93);
     }
@@ -959,9 +964,9 @@ let titleEditBtnRegion = null;
 function drawCountdown(ctx, s) {
     const sec = Math.ceil(countdownTimer / 60);
     const prog = (countdownTimer % 60) / 60;
-    const sz = Math.floor(s * 20 * (0.5 + prog * 0.5));
+    const sz = Math.floor(s * 20 * UI_SCALE * (0.5 + prog * 0.5));
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = `bold ${sz}px monospace`;
+    ctx.font = `bold ${sz}px 'Pixelify Sans',monospace`;
     ctx.fillStyle = `rgba(255,255,255,${0.5 + prog * 0.5})`;
     ctx.fillText(sec.toString(), canvas.width / 2, canvas.height / 2);
 }
@@ -969,25 +974,25 @@ function drawCountdown(ctx, s) {
 function drawPanicFlash(ctx, s) {
     const alpha = Math.max(0, 1 - gameFrame / 70);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = `bold ${Math.floor(s * 18)}px monospace`;
+    ctx.font = `bold ${uiFs(s, 18)}px 'Pixelify Sans',monospace`;
     ctx.fillStyle = `rgba(255,68,0,${alpha})`;
     ctx.fillText('PANIC!', canvas.width / 2, canvas.height / 2);
 }
 
 function drawHUD(ctx, s) {
     const alive = players.filter(p => p.alive).length;
-    const fs = Math.floor(s * 3.5);
+    const fs = uiFs(s, 3.5);
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.font = `bold ${fs}px monospace`;
+    ctx.font = `bold ${fs}px 'Pixelify Sans',monospace`;
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(4 * s, 4 * s, 52 * s, 8 * s);
+    ctx.fillRect(4 * s, 4 * s, 60 * s, 10 * s);
     ctx.fillStyle = '#fff';
     ctx.fillText(`Alive: ${alive}/${players.length}`, 6 * s, 5 * s);
 }
 
 function drawElimFeed(ctx, s) {
-    const fs = Math.floor(s * 2.8);
-    ctx.font = `${fs}px monospace`;
+    const fs = uiFs(s, 2.8);
+    ctx.font = `${fs}px 'Pixelify Sans',monospace`;
     ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
     for (let i = 0; i < elimFeed.length; i++) {
         const e = elimFeed[i];
@@ -1027,9 +1032,9 @@ function drawConfigScreen(ctx, s) {
     const contentW = right - left;
 
     // Title
-    const titleFs = Math.floor(s * 8);
+    const titleFs = uiFs(s, 8);
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    ctx.font = `bold ${titleFs}px monospace`;
+    ctx.font = `bold ${titleFs}px 'Pixelify Sans',monospace`;
     ctx.fillStyle = '#ff6600';
     ctx.fillText('EDIT PLAYERS', cx, 10 * s);
 
@@ -1037,8 +1042,8 @@ function drawConfigScreen(ctx, s) {
     const listTop = 30 * s;
     const rowH = CONFIG_ROW_H * s;
     const listH = CONFIG_MAX_VISIBLE * rowH;
-    const nameFs = Math.floor(s * 3.5);
-    ctx.font = `bold ${nameFs}px monospace`;
+    const nameFs = uiFs(s, 3.5);
+    ctx.font = `bold ${nameFs}px 'Pixelify Sans',monospace`;
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
 
     // List background
@@ -1091,8 +1096,8 @@ function drawConfigScreen(ctx, s) {
 
     // Scroll indicators
     if (configNames.length > CONFIG_MAX_VISIBLE) {
-        const arrowFs = Math.floor(s * 3);
-        ctx.font = `bold ${arrowFs}px monospace`;
+        const arrowFs = uiFs(s, 3);
+        ctx.font = `bold ${arrowFs}px 'Pixelify Sans',monospace`;
         ctx.textAlign = 'center';
         ctx.fillStyle = configScroll > 0 ? '#ffcc00' : '#4a3520';
         const arrowX = right + 8 * s;
@@ -1106,14 +1111,14 @@ function drawConfigScreen(ctx, s) {
     // Empty list message
     if (configNames.length === 0) {
         ctx.textAlign = 'center';
-        ctx.font = `${Math.floor(s * 3)}px monospace`;
+        ctx.font = `${uiFs(s, 3)}px 'Pixelify Sans',monospace`;
         ctx.fillStyle = '#665540';
         ctx.fillText('No players yet...', cx, listTop + listH / 2);
     }
 
     // Player count
     ctx.textAlign = 'right'; ctx.textBaseline = 'top';
-    ctx.font = `${Math.floor(s * 2.5)}px monospace`;
+    ctx.font = `${uiFs(s, 2.5)}px 'Pixelify Sans',monospace`;
     ctx.fillStyle = '#665540';
     ctx.fillText(configNames.length + '/30', right, listTop + listH + 2 * s);
 
@@ -1123,7 +1128,7 @@ function drawConfigScreen(ctx, s) {
     ctx.fillRect(addBtnX, addBtnY, addBtnW, addBtnH);
     ctx.fillStyle = '#88dd66';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = `bold ${Math.floor(s * 4)}px monospace`;
+    ctx.font = `bold ${uiFs(s, 4)}px 'Pixelify Sans',monospace`;
     ctx.fillText('+', addBtnX + addBtnW / 2, addBtnY + addBtnH / 2);
     configBtns.push({ x: addBtnX, y: addBtnY, w: addBtnW, h: addBtnH, action: 'add' });
 
@@ -1132,7 +1137,7 @@ function drawConfigScreen(ctx, s) {
     ctx.fillStyle = '#3a4a5a';
     ctx.fillRect(bulkBtnX, bulkBtnY, bulkBtnW, bulkBtnH);
     ctx.fillStyle = '#88bbdd';
-    ctx.font = `bold ${Math.floor(s * 2.8)}px monospace`;
+    ctx.font = `bold ${uiFs(s, 2.8)}px 'Pixelify Sans',monospace`;
     ctx.fillText('ADD ALL', bulkBtnX + bulkBtnW / 2, bulkBtnY + bulkBtnH / 2);
     configBtns.push({ x: bulkBtnX, y: bulkBtnY, w: bulkBtnW, h: bulkBtnH, action: 'bulk' });
 
@@ -1141,7 +1146,7 @@ function drawConfigScreen(ctx, s) {
     ctx.fillStyle = '#4a3520';
     ctx.fillRect(backX, backY, backW, backH);
     ctx.fillStyle = '#ccaa77';
-    ctx.font = `bold ${Math.floor(s * 4)}px monospace`;
+    ctx.font = `bold ${uiFs(s, 4)}px 'Pixelify Sans',monospace`;
     ctx.fillText('BACK', backX + backW / 2, backY + backH / 2);
     configBtns.push({ x: backX, y: backY, w: backW, h: backH, action: 'back' });
 
@@ -1158,7 +1163,7 @@ function drawConfigScreen(ctx, s) {
     if (configErrorTimer > 0) {
         const errAlpha = clamp(configErrorTimer / 30, 0, 1);
         ctx.textAlign = 'center';
-        ctx.font = `bold ${Math.floor(s * 3)}px monospace`;
+        ctx.font = `bold ${uiFs(s, 3)}px 'Pixelify Sans',monospace`;
         ctx.fillStyle = `rgba(255,180,80,${errAlpha})`;
         ctx.fillText(configError, cx, 195 * s);
     }
@@ -1176,31 +1181,31 @@ function drawWinnerScreen(ctx, s) {
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
 
     if (winner) {
-        const lbl = Math.floor(s * 5);
-        ctx.font = `${lbl}px monospace`;
+        const lbl = uiFs(s, 5);
+        ctx.font = `${lbl}px 'Pixelify Sans',monospace`;
         ctx.fillStyle = `rgba(200,200,200,${fadeIn})`;
         ctx.fillText('NEXT FACILITATOR', canvas.width / 2, canvas.height * 0.28);
 
-        const nm = Math.floor(s * 14);
-        ctx.font = `bold ${nm}px monospace`;
+        const nm = uiFs(s, 14);
+        ctx.font = `bold ${nm}px 'Pixelify Sans',monospace`;
         ctx.fillStyle = `rgba(255,204,0,${fadeIn})`;
         ctx.fillText(winner.name.toUpperCase(), canvas.width / 2, canvas.height * 0.44);
 
-        const em = Math.floor(s * 10);
+        const em = uiFs(s, 10);
         ctx.font = `${em}px serif`;
         ctx.fillText('\u{1F451}', canvas.width / 2, canvas.height * 0.6);
     } else {
-        const lbl = Math.floor(s * 6);
-        ctx.font = `bold ${lbl}px monospace`;
+        const lbl = uiFs(s, 6);
+        ctx.font = `bold ${lbl}px 'Pixelify Sans',monospace`;
         ctx.fillStyle = `rgba(255,100,50,${fadeIn})`;
         ctx.fillText('EVERYONE PERISHED!', canvas.width / 2, canvas.height * 0.4);
-        ctx.font = `${Math.floor(s * 4)}px monospace`;
+        ctx.font = `${uiFs(s, 4)}px 'Pixelify Sans',monospace`;
         ctx.fillStyle = `rgba(200,200,200,${fadeIn})`;
         ctx.fillText('No facilitator chosen... run it again!', canvas.width / 2, canvas.height * 0.52);
     }
 
     if (winnerTimer > 200 && Math.floor(frame / 30) % 2 === 0) {
-        ctx.font = `bold ${Math.floor(s * 4)}px monospace`;
+        ctx.font = `bold ${uiFs(s, 4)}px 'Pixelify Sans',monospace`;
         ctx.fillStyle = `rgba(255,255,255,${fadeIn})`;
         ctx.fillText('CLICK TO PLAY AGAIN', canvas.width / 2, canvas.height * 0.88);
     }
