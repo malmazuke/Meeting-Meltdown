@@ -78,18 +78,20 @@ let names = loadNames();
 //  CONSTANTS
 // ═══════════════════════════════════════════════════════════════
 const UI_SCALE = 1.5;
+const GAME_SPEED = 0.8;
 const W = 384, H = 216;
 const WORLD_H = 2400;
 const PW = 8, PH = 10;
 const PLAT_H = 6;
-const GRAV = 0.18;
-const JUMP = -4.1;
-const SPD = 0.72;
+const GRAV = 0.18 * GAME_SPEED;
+const JUMP = -4.1 * Math.sqrt(GAME_SPEED);
+const SPD = 0.72 * GAME_SPEED;
 const FRIC = 0.80;
 const AIR_FRIC = 0.93;
 const AIR_CTRL = 0.45;
 const MAX_JUMP_H = (JUMP * JUMP) / (2 * GRAV);
 const MAX_JUMP_DIST = 55;
+const LAVA_BASE_SPEED = 0.34 * GAME_SPEED;
 
 // ═══════════════════════════════════════════════════════════════
 //  CANVAS SETUP (internal pixel buffer + display canvas)
@@ -357,7 +359,7 @@ class Player {
         this.vx += this.moveDir * accel;
         this.vx *= fric;
         this.vy += GRAV;
-        this.vy = Math.min(this.vy, 4.4);
+        this.vy = Math.min(this.vy, 4.4 * GAME_SPEED);
         this.x += this.vx;
         this.y += this.vy;
 
@@ -775,7 +777,7 @@ function update() {
             const aliveCount = players.filter(p => p.alive).length;
             const elimBonus = 1 + (players.length - aliveCount) / players.length * 0.4;
             const timeAccel = 1 + gameFrame / 6000;
-            lavaY -= 0.34 * elimBonus * timeAccel;
+            lavaY -= LAVA_BASE_SPEED * elimBonus * timeAccel;
         }
 
         lavaSpawnBubbles(lavaY, frame);
@@ -987,7 +989,7 @@ function drawHUD(ctx, s) {
 }
 
 function drawElimFeed(ctx, s) {
-    const fs = uiFs(s, 2.8);
+    const fs = uiFs(s, 5.6);
     ctx.font = `${fs}px 'Pixelify Sans',monospace`;
     ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
     for (let i = 0; i < elimFeed.length; i++) {
@@ -996,7 +998,7 @@ function drawElimFeed(ctx, s) {
         const a = clamp(1 - age / 350, 0, 1);
         const yy = canvas.height - (elimFeed.length - i) * fs * 1.5 - 4 * s;
         ctx.fillStyle = `rgba(0,0,0,${a * 0.45})`;
-        ctx.fillRect(3 * s, yy - fs, 95 * s, fs * 1.3);
+        ctx.fillRect(3 * s, yy - fs, 160 * s, fs * 1.3);
         ctx.fillStyle = `rgba(255,150,50,${a})`;
         ctx.fillText(e.msg, 5 * s, yy);
     }
