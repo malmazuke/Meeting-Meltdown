@@ -629,10 +629,6 @@ function addConfigName(raw) {
     const name = raw.trim();
     if (!name) return false;
     if (configNames.length >= 30) { showConfigError('Max 30 players!'); return false; }
-    if (configNames.some(n => n.toLowerCase() === name.toLowerCase())) {
-        showConfigError('Duplicate name!');
-        return false;
-    }
     configNames.push(name);
     const maxScroll = Math.max(0, configNames.length - CONFIG_MAX_VISIBLE);
     configScroll = maxScroll;
