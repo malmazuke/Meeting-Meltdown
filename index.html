@@ -6,7 +6,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;700&display=swap" rel="stylesheet">
-<title>Platform Panic!</title>
+<title>Meeting Meltdown!</title>
 <style>
 * { margin: 0; padding: 0; }
 html, body {
@@ -46,7 +46,7 @@ canvas {
 //  CONFIGURATION
 // ═══════════════════════════════════════════════════════════════
 const DEFAULT_NAMES = ['Mark', 'Dan', 'Dave', 'Jack', 'Peter', 'Tim'];
-const STORAGE_KEY = 'platformPanic_names';
+const STORAGE_KEY = 'meetingMeltdown_names';
 
 function loadNames() {
     const params = new URLSearchParams(location.search);
@@ -570,7 +570,9 @@ let state = 'title';
 let players = [];
 let lavaY = WORLD_H + 60;
 let frame = 0, gameFrame = 0;
+const COUNTDOWN_SECONDS = 3;
 let countdownTimer = 0;
+let countdownStart = 0;
 let winner = null;
 let elimFeed = [];
 let slowMo = 0;
@@ -736,7 +738,8 @@ function initGame() {
     camera.targetY = camera.y;
     camera.shakeIntensity = 0;
     state = 'countdown';
-    countdownTimer = 180;
+    countdownStart = performance.now();
+    countdownTimer = COUNTDOWN_SECONDS;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -760,7 +763,8 @@ function update() {
     }
 
     if (state === 'countdown') {
-        countdownTimer--;
+        const elapsed = (performance.now() - countdownStart) / 1000;
+        countdownTimer = COUNTDOWN_SECONDS - elapsed;
         updateParticles();
         if (countdownTimer <= 0) state = 'playing';
         return;
@@ -917,9 +921,9 @@ function drawTitleScreen(ctx, s) {
     const t1 = uiFs(s, 16);
     ctx.font = `bold ${t1}px 'Pixelify Sans',monospace`;
     ctx.fillStyle = '#ff6600';
-    ctx.fillText('PLATFORM', canvas.width / 2, canvas.height * 0.22);
+    ctx.fillText('MEETING', canvas.width / 2, canvas.height * 0.22);
     ctx.fillStyle = '#ffcc00';
-    ctx.fillText('PANIC!', canvas.width / 2, canvas.height * 0.22 + t1 * 1.15);
+    ctx.fillText('MELTDOWN!', canvas.width / 2, canvas.height * 0.22 + t1 * 1.15);
 
     const sub = uiFs(s, 4);
     ctx.font = `${sub}px 'Pixelify Sans',monospace`;
@@ -960,8 +964,8 @@ function drawTitleScreen(ctx, s) {
 let titleEditBtnRegion = null;
 
 function drawCountdown(ctx, s) {
-    const sec = Math.ceil(countdownTimer / 60);
-    const prog = (countdownTimer % 60) / 60;
+    const sec = Math.ceil(countdownTimer);
+    const prog = countdownTimer % 1;
     const sz = Math.floor(s * 20 * UI_SCALE * (0.5 + prog * 0.5));
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = `bold ${sz}px 'Pixelify Sans',monospace`;
@@ -974,7 +978,7 @@ function drawPanicFlash(ctx, s) {
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = `bold ${uiFs(s, 18)}px 'Pixelify Sans',monospace`;
     ctx.fillStyle = `rgba(255,68,0,${alpha})`;
-    ctx.fillText('PANIC!', canvas.width / 2, canvas.height / 2);
+    ctx.fillText('MELTDOWN!', canvas.width / 2, canvas.height / 2);
 }
 
 function drawHUD(ctx, s) {
