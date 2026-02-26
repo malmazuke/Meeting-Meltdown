@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Platform Panic!</title>
+<style>
+* { margin: 0; padding: 0; }
+html, body {
+    width: 100%; height: 100%;
+    background: #0a0604;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    cursor: pointer;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  CONFIGURATION — Edit this array to change contestants!
+// ═══════════════════════════════════════════════════════════════
+const NAMES = [
+    'Alice', 'Bob', 'Charlie', 'Dana', 'Eve', 'Frank'
+];
+
+// ═══════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════════════════════════════════════
+const W = 384, H = 216;
+const WORLD_H = 2400;
+const PW = 8, PH = 10;
+const PLAT_H = 6;
+const GRAV = 0.22;
+const JUMP = -3.7;
+const SPD = 0.9;
+const FRIC = 0.80;
+const AIR_FRIC = 0.93;
+const AIR_CTRL = 0.45;
+const MAX_JUMP_H = (JUMP * JUMP) / (2 * GRAV);
+const MAX_JUMP_DIST = 55;
+
+// ═══════════════════════════════════════════════════════════════
+//  CANVAS SETUP (internal pixel buffer + display canvas)
+// ═══════════════════════════════════════════════════════════════
+const canvas = document.getElementById('c');
+const dctx = canvas.getContext('2d');
+const buf = document.createElement('canvas');
+buf.width = W; buf.height = H;
+const bx = buf.getContext('2d');
+
+function resize() {
+    const s = Math.max(1, Math.floor(Math.min(innerWidth / W, innerHeight / H)));
+    canvas.width = W * s;
+    canvas.height = H * s;
+    canvas.style.width = canvas.width + 'px';
+    canvas.style.height = canvas.height + 'px';
+}
+addEventListener('resize', resize);
+resize();
+
+// ═══════════════════════════════════════════════════════════════
+//  UTILITIES
+// ═══════════════════════════════════════════════════════════════
+const rand  = (a, b) => Math.random() * (b - a) + a;
+const irand = (a, b) => Math.floor(rand(a, b + 1));
+const lerp  = (a, b, t) => a + (b - a) * t;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+function hsl(h, s, l) {
+    s /= 100; l /= 100;
+    const k = n => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+    const toHex = n => Math.round(f(n) * 255).toString(16).padStart(2, '0');
+    return `#${toHex(0)}${toHex(8)}${toHex(4)}`;
+}
+
+function playerColors(i) {
+    const hue = (i * 137.508) % 360;
+    return {
+        hat:     hsl(hue, 75, 55),
+        body:    hsl(hue, 65, 42),
+        skin:    '#f0c8a0',
+        shoes:   '#5a3a28',
+        outline: hsl(hue, 55, 22),
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PARTICLES
+// ═══════════════════════════════════════════════════════════════
+let particles = [];
+
+function emitParticles(x, y, count, color, opts = {}) {
+    for (let i = 0; i < count; i++) {
+        particles.push({
+            x, y,
+            vx: (opts.vx || 0) + rand(-2, 2) * (opts.spread || 1),
+            vy: (opts.vy || 0) + rand(-3, 0.5) * (opts.spread || 1),
+            life: opts.life || rand(20, 45),
+            maxLife: 0,
+            color: color,
+            size: opts.size || rand(1, 3),
+            gravity: opts.gravity !== undefined ? opts.gravity : 0.08,
+        });
+        particles[particles.length - 1].maxLife = particles[particles.length - 1].life;
+    }
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx; p.y += p.vy;
+        p.vy += p.gravity;
+        if (--p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function drawParticles(ctx, camY) {
+    for (const p of particles) {
+        ctx.globalAlpha = p.life / p.maxLife;
+        ctx.fillStyle = p.color;
+        const s = Math.ceil(p.size * (p.life / p.maxLife));
+        ctx.fillRect(Math.floor(p.x), Math.floor(p.y - camY), s, s);
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PLATFORMS
+// ═══════════════════════════════════════════════════════════════
+let platforms = [];
+
+function generatePlatforms() {
+    platforms = [];
+    platforms.push({ x: 8, y: WORLD_H - 40, w: W - 16, h: PLAT_H });
+    platforms.push({ x: 20, y: WORLD_H - 80, w: 90, h: PLAT_H });
+    platforms.push({ x: W / 2 - 55, y: WORLD_H - 90, w: 110, h: PLAT_H });
+    platforms.push({ x: W - 115, y: WORLD_H - 75, w: 95, h: PLAT_H });
+
+    let y = WORLD_H - 130;
+    while (y > 40) {
+        const progress = 1 - y / WORLD_H;
+        const gap = lerp(30, 44, progress) + rand(-4, 4);
+        const maxPlats = Math.max(2, Math.floor(5.5 - progress * 3));
+        const numPlats = irand(Math.max(1, maxPlats - 2), maxPlats);
+        const maxW = Math.max(26, Math.floor(lerp(80, 30, progress)));
+        const minW = Math.max(18, Math.floor(maxW * 0.45));
+        const section = W / numPlats;
+
+        for (let i = 0; i < numPlats; i++) {
+            const pw = irand(minW, maxW);
+            const px = clamp(
+                Math.floor(section * i + rand(6, section - pw - 6)),
+                4, W - pw - 4
+            );
+            platforms.push({ x: px, y: Math.floor(y), w: pw, h: PLAT_H });
+        }
+        y -= gap;
+    }
+}
+
+function drawPlatform(ctx, p, camY) {
+    const sy = Math.floor(p.y - camY);
+    if (sy > H + 4 || sy + p.h < -4) return;
+
+    ctx.fillStyle = '#6b5d4f';
+    ctx.fillRect(p.x, sy, p.w, p.h);
+
+    ctx.fillStyle = '#5d7a3a';
+    ctx.fillRect(p.x, sy, p.w, 1);
+    ctx.fillStyle = '#7a9a4a';
+    for (let gx = p.x; gx < p.x + p.w; gx += 3) {
+        if ((gx * 7 + p.y * 13) % 5 < 3) ctx.fillRect(gx, sy, 2, 1);
+    }
+
+    ctx.fillStyle = '#8a7a68';
+    ctx.fillRect(p.x, sy + 1, p.w, 1);
+    ctx.fillStyle = '#3a3028';
+    ctx.fillRect(p.x, sy + p.h - 1, p.w, 1);
+
+    ctx.fillStyle = '#594b3d';
+    for (let bx = p.x + 10; bx < p.x + p.w - 1; bx += 14) {
+        ctx.fillRect(bx, sy + 2, 1, p.h - 3);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PLAYER
+// ═══════════════════════════════════════════════════════════════
+class Player {
+    constructor(name, index, x, y) {
+        this.name = name;
+        this.index = index;
+        this.colors = playerColors(index);
+        this.x = x; this.y = y;
+        this.vx = 0; this.vy = 0;
+        this.w = PW; this.h = PH;
+        this.prevY = y;
+        this.onGround = false;
+        this.alive = true;
+        this.facing = Math.random() > 0.5 ? 1 : -1;
+        this.walkFrame = 0;
+        this.currentPlatform = null;
+        this.targetPlatform = null;
+        this.moveDir = 0;
+        this.flashTimer = 0;
+
+        this.reactionTime = irand(4, 16);
+        this.dangerThreshold = rand(45, 130);
+        this.jumpSkill = rand(0.55, 1.0);
+        this.aggression = rand(0, 0.18);
+    }
+
+    jump() {
+        if (!this.onGround) return;
+        this.vy = JUMP * rand(0.92, 1.06);
+        this.onGround = false;
+        emitParticles(this.x + this.w / 2, this.y + this.h, 3, '#8a7a5a', {
+            spread: 0.4, life: 10, gravity: 0.04, size: 1
+        });
+    }
+
+    findBestPlatform(lavaY) {
+        let best = null, bestScore = -Infinity;
+        const cx = this.x + this.w / 2;
+
+        for (const p of platforms) {
+            if (p.y + p.h > lavaY - 25) continue;
+            const dy = this.y - p.y;
+            if (dy < -3) continue;
+            if (dy > MAX_JUMP_H * 0.92) continue;
+            const nearX = clamp(cx, p.x, p.x + p.w);
+            const dx = Math.abs(nearX - cx);
+            if (dx > MAX_JUMP_DIST) continue;
+
+            const score = dy * 1.5 - dx * 0.9 + (lavaY - p.y) * 0.08
+                        + p.w * 0.15 + rand(-12, 12) * (1.05 - this.jumpSkill);
+            if (score > bestScore) { bestScore = score; best = p; }
+        }
+        return best;
+    }
+
+    findNearbyPlayer(players) {
+        let closest = null, closestD = 35;
+        for (const p of players) {
+            if (p === this || !p.alive) continue;
+            const d = Math.abs(p.x - this.x) + Math.abs(p.y - this.y);
+            if (d < closestD) { closestD = d; closest = p; }
+        }
+        return closest;
+    }
+
+    updateAI(players, lavaY, frame) {
+        if (frame % this.reactionTime !== 0) return;
+        const dangerDist = lavaY - (this.y + this.h);
+
+        if (this.onGround) {
+            if (dangerDist < this.dangerThreshold) {
+                const tgt = this.findBestPlatform(lavaY);
+                if (tgt) {
+                    this.targetPlatform = tgt;
+                    const tcx = tgt.x + tgt.w / 2;
+                    const mcx = this.x + this.w / 2;
+                    this.moveDir = Math.abs(tcx - mcx) > 4 ? (tcx > mcx ? 1 : -1) : 0;
+                    if (Math.abs(tcx - mcx) < tgt.w * 0.7 || dangerDist < 18 || Math.random() < 0.12)
+                        this.jump();
+                } else {
+                    this.moveDir = irand(0, 1) * 2 - 1;
+                    if (Math.random() < 0.35) this.jump();
+                }
+            } else {
+                if (Math.random() < 0.07) this.moveDir = irand(-1, 1);
+                if (Math.random() < 0.015) this.jump();
+                if (Math.random() < this.aggression) {
+                    const near = this.findNearbyPlayer(players);
+                    if (near) {
+                        this.moveDir = near.x > this.x ? 1 : -1;
+                        if (Math.random() < 0.2) this.jump();
+                    }
+                }
+                if (this.currentPlatform) {
+                    const cp = this.currentPlatform;
+                    if (this.x < cp.x + 3) this.moveDir = 1;
+                    if (this.x + this.w > cp.x + cp.w - 3) this.moveDir = -1;
+                }
+            }
+        } else if (this.targetPlatform) {
+            const tcx = this.targetPlatform.x + this.targetPlatform.w / 2;
+            this.moveDir = tcx > this.x + this.w / 2 ? 1 : -1;
+        }
+    }
+
+    update(players, lavaY, frame) {
+        if (!this.alive) return false;
+        this.prevY = this.y;
+        this.updateAI(players, lavaY, frame);
+
+        const accel = this.onGround ? SPD : SPD * AIR_CTRL;
+        const fric  = this.onGround ? FRIC : AIR_FRIC;
+        this.vx += this.moveDir * accel;
+        this.vx *= fric;
+        this.vy += GRAV;
+        this.vy = Math.min(this.vy, 5.5);
+        this.x += this.vx;
+        this.y += this.vy;
+
+        if (this.x < 1)          { this.x = 1; this.vx *= -0.5; }
+        if (this.x + this.w > W - 1) { this.x = W - 1 - this.w; this.vx *= -0.5; }
+
+        if (Math.abs(this.vx) > 0.3) this.facing = this.vx > 0 ? 1 : -1;
+        if (this.onGround && Math.abs(this.vx) > 0.3) this.walkFrame++;
+        if (this.flashTimer > 0) this.flashTimer--;
+
+        this.onGround = false;
+        this.currentPlatform = null;
+        for (const p of platforms) {
+            if (Math.abs(p.y - this.y) > 30) continue;
+            if (this.x + this.w <= p.x || this.x >= p.x + p.w) continue;
+
+            if (this.vy >= 0 && this.prevY + this.h <= p.y + 3 && this.y + this.h >= p.y) {
+                if (this.vy > 2.2) {
+                    emitParticles(this.x + this.w / 2, p.y, 3, '#8a7a5a', {
+                        spread: 0.4, life: 8, gravity: 0.03, size: 1
+                    });
+                }
+                this.y = p.y - this.h;
+                this.vy = 0;
+                this.onGround = true;
+                this.currentPlatform = p;
+            } else if (this.vy < 0 && this.prevY >= p.y + p.h - 2 && this.y < p.y + p.h) {
+                this.y = p.y + p.h;
+                this.vy = 0.5;
+            }
+        }
+
+        if (this.y + this.h > lavaY) { this.alive = false; return true; }
+        if (this.y > WORLD_H + 60)   { this.alive = false; return true; }
+        return false;
+    }
+
+    draw(ctx, camY) {
+        if (!this.alive) return;
+        const sx = Math.floor(this.x);
+        const sy = Math.floor(this.y - camY);
+        if (sy > H + 14 || sy < -14) return;
+
+        if (this.flashTimer > 0 && this.flashTimer % 4 < 2) {
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(sx, sy, this.w, this.h);
+            return;
+        }
+
+        const c = this.colors;
+        const f = this.facing;
+
+        ctx.fillStyle = c.outline;
+        ctx.fillRect(sx, sy + 1, this.w, this.h - 1);
+
+        ctx.fillStyle = c.hat;
+        ctx.fillRect(sx + 1, sy, 6, 2);
+        ctx.fillRect(sx, sy + 2, 8, 1);
+
+        ctx.fillStyle = c.skin;
+        ctx.fillRect(sx + 1, sy + 3, 6, 2);
+
+        ctx.fillStyle = '#1a1a1a';
+        if (f >= 0) {
+            ctx.fillRect(sx + 4, sy + 3, 1, 1);
+            ctx.fillRect(sx + 6, sy + 3, 1, 1);
+        } else {
+            ctx.fillRect(sx + 1, sy + 3, 1, 1);
+            ctx.fillRect(sx + 3, sy + 3, 1, 1);
+        }
+
+        ctx.fillStyle = c.body;
+        ctx.fillRect(sx + 1, sy + 5, 6, 3);
+
+        ctx.fillStyle = c.shoes;
+        if (!this.onGround) {
+            if (this.vy < 0) {
+                ctx.fillRect(sx + 2, sy + 8, 2, 2);
+                ctx.fillRect(sx + 4, sy + 8, 2, 2);
+            } else {
+                ctx.fillRect(sx + 1, sy + 8, 2, 2);
+                ctx.fillRect(sx + 5, sy + 8, 2, 2);
+            }
+        } else if (Math.floor(this.walkFrame / 6) % 2 === 0) {
+            ctx.fillRect(sx + 1, sy + 8, 3, 2);
+            ctx.fillRect(sx + 5, sy + 8, 2, 2);
+        } else {
+            ctx.fillRect(sx + 1, sy + 8, 2, 2);
+            ctx.fillRect(sx + 4, sy + 8, 3, 2);
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PLAYER-PLAYER COLLISIONS
+// ═══════════════════════════════════════════════════════════════
+function resolvePlayerCollisions(players) {
+    for (let i = 0; i < players.length; i++) {
+        const a = players[i];
+        if (!a.alive) continue;
+        for (let j = i + 1; j < players.length; j++) {
+            const b = players[j];
+            if (!b.alive) continue;
+            if (a.x + a.w <= b.x || b.x + b.w <= a.x ||
+                a.y + a.h <= b.y || b.y + b.h <= a.y) continue;
+
+            const ox = Math.min(a.x + a.w - b.x, b.x + b.w - a.x);
+            const oy = Math.min(a.y + a.h - b.y, b.y + b.h - a.y);
+
+            if (ox < oy) {
+                const dir = (a.x + a.w / 2) < (b.x + b.w / 2) ? -1 : 1;
+                a.x += dir * ox * 0.5;
+                b.x -= dir * ox * 0.5;
+                a.vx += dir * -1.6;
+                b.vx += dir * 1.6;
+                a.flashTimer = 5;
+                b.flashTimer = 5;
+            } else {
+                if (a.y < b.y) {
+                    a.y = b.y - a.h;
+                    a.vy = -2.8;
+                    b.vy += 1.2;
+                } else {
+                    b.y = a.y - b.h;
+                    b.vy = -2.8;
+                    a.vy += 1.2;
+                }
+                a.flashTimer = 4;
+                b.flashTimer = 4;
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LAVA
+// ═══════════════════════════════════════════════════════════════
+function drawLava(ctx, lavaY, camY, frame) {
+    const screenY = lavaY - camY;
+    if (screenY > H + 8) return;
+
+    for (let i = 0; i < 8; i++) {
+        const a = (8 - i) / 32;
+        ctx.fillStyle = `rgba(255,${60 + i * 12},0,${a})`;
+        ctx.fillRect(0, Math.floor(screenY) - 8 + i, W, 1);
+    }
+
+    for (let x = 0; x < W; x += 2) {
+        const wave = Math.sin(x * 0.06 + frame * 0.08) * 2.5
+                   + Math.sin(x * 0.13 + frame * 0.05) * 1.2;
+        const wy = Math.floor(screenY + wave);
+        ctx.fillStyle = '#ffdd44';
+        ctx.fillRect(x, wy - 1, 2, 1);
+        ctx.fillStyle = '#ff6600';
+        ctx.fillRect(x, wy, 2, 2);
+        ctx.fillStyle = '#dd3300';
+        ctx.fillRect(x, wy + 2, 2, Math.max(0, H - wy));
+    }
+
+    const deepY = Math.floor(screenY + 10);
+    if (deepY < H) {
+        ctx.fillStyle = '#aa2200';
+        ctx.fillRect(0, deepY, W, H - deepY);
+    }
+}
+
+function lavaSpawnBubbles(lavaY, frame) {
+    if (Math.random() < 0.18) {
+        emitParticles(rand(10, W - 10), lavaY - 1, 1, '#ffaa00', {
+            vy: -1.8, spread: 0.2, life: 14, gravity: -0.04, size: 2
+        });
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CAMERA
+// ═══════════════════════════════════════════════════════════════
+const camera = {
+    y: 0, targetY: 0,
+    shakeX: 0, shakeY: 0, shakeIntensity: 0,
+
+    shake(intensity) {
+        this.shakeIntensity = Math.max(this.shakeIntensity, intensity);
+    },
+
+    update(alivePlayers, lavaY) {
+        if (alivePlayers.length === 0) return;
+        const ys = alivePlayers.map(p => p.y).sort((a, b) => a - b);
+        const median = ys[Math.floor(ys.length / 2)];
+        this.targetY = median - H * 0.38;
+        this.targetY = Math.min(this.targetY, lavaY - H + 28);
+        this.targetY = Math.min(this.targetY, WORLD_H - H);
+        this.targetY = Math.max(this.targetY, 0);
+        this.y += (this.targetY - this.y) * 0.055;
+
+        if (this.shakeIntensity > 0.15) {
+            this.shakeX = rand(-1, 1) * this.shakeIntensity;
+            this.shakeY = rand(-1, 1) * this.shakeIntensity;
+            this.shakeIntensity *= 0.87;
+        } else {
+            this.shakeX = 0; this.shakeY = 0; this.shakeIntensity = 0;
+        }
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  GAME STATE
+// ═══════════════════════════════════════════════════════════════
+let state = 'title';
+let players = [];
+let lavaY = WORLD_H + 60;
+let frame = 0, gameFrame = 0;
+let countdownTimer = 0;
+let winner = null;
+let elimFeed = [];
+let slowMo = 0;
+let winnerTimer = 0;
+
+const DEATH_MSGS = [
+    '$ sank into the lava!',
+    "$ couldn't hold on!",
+    '$ got toasted!',
+    '$ is eliminated!',
+    '$ took a lava bath!',
+    '$ went for a swim!',
+    'Goodbye, $!',
+    '$ got too hot!',
+    '$ melted away!',
+    '$ burned out!',
+];
+
+function setupTitleScreen() {
+    generatePlatforms();
+    players = [];
+    particles = [];
+    elimFeed = [];
+    winner = null;
+    winnerTimer = 0;
+    slowMo = 0;
+    gameFrame = 0;
+    lavaY = WORLD_H + 100;
+
+    const gp = platforms[0];
+    for (let i = 0; i < NAMES.length; i++) {
+        const x = gp.x + rand(5, gp.w - PW - 5);
+        players.push(new Player(NAMES[i], i, x, gp.y - PH));
+    }
+    camera.y = WORLD_H - H - 10;
+    camera.targetY = camera.y;
+    camera.shakeIntensity = 0;
+    state = 'title';
+}
+
+function initGame() {
+    generatePlatforms();
+    players = [];
+    particles = [];
+    elimFeed = [];
+    winner = null;
+    winnerTimer = 0;
+    slowMo = 0;
+    gameFrame = 0;
+    lavaY = WORLD_H + 60;
+
+    const gp = platforms[0];
+    const spacing = Math.min(12, (gp.w - 8) / NAMES.length);
+    const startX = gp.x + (gp.w - spacing * NAMES.length) / 2;
+    for (let i = 0; i < NAMES.length; i++) {
+        players.push(new Player(NAMES[i], i, startX + i * spacing, gp.y - PH));
+    }
+
+    camera.y = gp.y - H + 35;
+    camera.targetY = camera.y;
+    camera.shakeIntensity = 0;
+    state = 'countdown';
+    countdownTimer = 180;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UPDATE
+// ═══════════════════════════════════════════════════════════════
+function update() {
+    frame++;
+
+    if (state === 'title') {
+        for (const p of players) p.update(players, WORLD_H + 200, frame);
+        resolvePlayerCollisions(players);
+        updateParticles();
+        const alive = players.filter(p => p.alive);
+        camera.update(alive, WORLD_H + 200);
+        return;
+    }
+
+    if (state === 'countdown') {
+        countdownTimer--;
+        updateParticles();
+        if (countdownTimer <= 0) state = 'playing';
+        return;
+    }
+
+    if (state === 'playing') {
+        if (slowMo > 0) {
+            slowMo--;
+            if (frame % 3 !== 0) { updateParticles(); return; }
+        }
+        gameFrame++;
+
+        if (gameFrame > 100) {
+            const aliveCount = players.filter(p => p.alive).length;
+            const elimBonus = 1 + (players.length - aliveCount) / players.length * 0.4;
+            const timeAccel = 1 + gameFrame / 6000;
+            lavaY -= 0.42 * elimBonus * timeAccel;
+        }
+
+        lavaSpawnBubbles(lavaY, frame);
+
+        for (const p of players) {
+            if (p.update(players, lavaY, gameFrame)) {
+                const msg = DEATH_MSGS[irand(0, DEATH_MSGS.length - 1)].replace('$', p.name);
+                elimFeed.push({ msg, time: frame });
+                if (elimFeed.length > 3) elimFeed.shift();
+
+                emitParticles(p.x + p.w / 2, p.y + p.h, 16, '#ff4400', {
+                    spread: 2.2, life: 28, gravity: 0.1, size: 2
+                });
+                emitParticles(p.x + p.w / 2, p.y + p.h, 10, '#ffcc00', {
+                    spread: 1.5, life: 18, gravity: 0.05, size: 1.5
+                });
+
+                const alive = players.filter(q => q.alive).length;
+                camera.shake(lerp(9, 3, alive / players.length));
+                if (alive <= 4) slowMo = 14;
+            }
+        }
+
+        resolvePlayerCollisions(players);
+
+        const alive = players.filter(p => p.alive);
+        if (alive.length <= 1) {
+            winner = alive.length === 1 ? alive[0] : null;
+            state = 'winner';
+            winnerTimer = 0;
+            camera.shake(12);
+            if (winner) {
+                const cols = ['#ff4444','#44ff44','#4444ff','#ffff44','#ff44ff','#44ffff','#ffffff'];
+                for (let i = 0; i < 50; i++) {
+                    emitParticles(
+                        winner.x + winner.w / 2 + rand(-30, 30),
+                        winner.y - 10 + rand(-10, 5),
+                        1, cols[i % cols.length],
+                        { vy: rand(-4, -1), spread: 2, life: rand(60, 100), gravity: 0.03, size: 2 }
+                    );
+                }
+            }
+        }
+
+        camera.update(alive, lavaY);
+    }
+
+    if (state === 'winner') {
+        winnerTimer++;
+        if (winner && winnerTimer % 12 === 0) {
+            const cols = ['#ff4444','#44ff44','#4444ff','#ffff44','#ff44ff'];
+            emitParticles(
+                winner.x + winner.w / 2, winner.y - 4,
+                2, cols[irand(0, cols.length - 1)],
+                { vy: rand(-3, -1), spread: 1.2, life: 45, gravity: 0.025, size: 2 }
+            );
+        }
+        lavaSpawnBubbles(lavaY, frame);
+    }
+
+    updateParticles();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RENDERING
+// ═══════════════════════════════════════════════════════════════
+function drawBackground(ctx, camY) {
+    ctx.fillStyle = '#120c08';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#1e1410';
+    ctx.fillRect(0, 0, 7, H);
+    ctx.fillRect(W - 7, 0, 7, H);
+
+    ctx.fillStyle = '#261a12';
+    for (let wy = 0; wy < H; wy += 11) {
+        const off = ((wy + Math.floor(camY)) * 7 + 3) % 7;
+        ctx.fillRect(1, wy + off % 4, 3, 3);
+        ctx.fillRect(W - 5, wy + (off + 3) % 5, 3, 2);
+    }
+}
+
+function render() {
+    const camY = Math.floor(camera.y + camera.shakeY);
+    const camX = Math.floor(camera.shakeX);
+
+    bx.save();
+    bx.translate(camX, 0);
+    drawBackground(bx, camY);
+    for (const p of platforms) drawPlatform(bx, p, camY);
+
+    const sorted = players.filter(p => p.alive).sort((a, b) => a.y - b.y);
+    for (const p of sorted) p.draw(bx, camY);
+    drawParticles(bx, camY);
+    drawLava(bx, lavaY, camY, frame);
+    bx.restore();
+
+    dctx.imageSmoothingEnabled = false;
+    dctx.drawImage(buf, 0, 0, canvas.width, canvas.height);
+
+    const scale = canvas.width / W;
+
+    if (state === 'title')                            drawTitleScreen(dctx, scale);
+    if (state === 'countdown')                        drawCountdown(dctx, scale);
+    if (state !== 'title')                            drawNameLabels(dctx, scale, camY);
+    if (state === 'playing')                          { drawHUD(dctx, scale); drawElimFeed(dctx, scale); drawTensionBorder(dctx, scale); }
+    if (state === 'playing' && gameFrame < 70)        drawPanicFlash(dctx, scale);
+    if (state === 'winner')                           drawWinnerScreen(dctx, scale);
+}
+
+// ── UI HELPERS ────────────────────────────────────────────────
+
+function drawNameLabels(ctx, s, camY) {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    const fs = Math.max(9, Math.floor(s * 3.5));
+    ctx.font = `bold ${fs}px monospace`;
+
+    for (const p of players) {
+        if (!p.alive) continue;
+        const sx = (p.x + p.w / 2 + camera.shakeX) * s;
+        const sy = (p.y - camY - 3) * s;
+        if (sy < -20 || sy > canvas.height) continue;
+        ctx.fillStyle = 'rgba(0,0,0,0.65)';
+        ctx.fillText(p.name, sx + 1, sy + 1);
+        ctx.fillStyle = p.colors.hat;
+        ctx.fillText(p.name, sx, sy);
+    }
+}
+
+function drawTitleScreen(ctx, s) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.textAlign = 'center';
+
+    const t1 = Math.floor(s * 16);
+    ctx.font = `bold ${t1}px monospace`;
+    ctx.fillStyle = '#ff6600';
+    ctx.fillText('PLATFORM', canvas.width / 2, canvas.height * 0.22);
+    ctx.fillStyle = '#ffcc00';
+    ctx.fillText('PANIC!', canvas.width / 2, canvas.height * 0.22 + t1 * 1.15);
+
+    const sub = Math.floor(s * 4);
+    ctx.font = `${sub}px monospace`;
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('Who will facilitate next?', canvas.width / 2, canvas.height * 0.42);
+
+    const ls = Math.floor(s * 3.5);
+    ctx.font = `bold ${ls}px monospace`;
+    const cols = Math.min(3, Math.ceil(NAMES.length / 10));
+    const rows = Math.ceil(NAMES.length / cols);
+    const colW = canvas.width / (cols + 1);
+
+    for (let i = 0; i < NAMES.length; i++) {
+        const col = Math.floor(i / rows);
+        const row = i % rows;
+        ctx.fillStyle = playerColors(i).hat;
+        ctx.fillText(NAMES[i], colW * (col + 1), canvas.height * 0.50 + row * ls * 1.8);
+    }
+
+    if (Math.floor(frame / 30) % 2 === 0) {
+        ctx.font = `bold ${Math.floor(s * 5)}px monospace`;
+        ctx.fillStyle = '#fff';
+        ctx.fillText('CLICK TO START', canvas.width / 2, canvas.height * 0.93);
+    }
+}
+
+function drawCountdown(ctx, s) {
+    const sec = Math.ceil(countdownTimer / 60);
+    const prog = (countdownTimer % 60) / 60;
+    const sz = Math.floor(s * 20 * (0.5 + prog * 0.5));
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `bold ${sz}px monospace`;
+    ctx.fillStyle = `rgba(255,255,255,${0.5 + prog * 0.5})`;
+    ctx.fillText(sec.toString(), canvas.width / 2, canvas.height / 2);
+}
+
+function drawPanicFlash(ctx, s) {
+    const alpha = Math.max(0, 1 - gameFrame / 70);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `bold ${Math.floor(s * 18)}px monospace`;
+    ctx.fillStyle = `rgba(255,68,0,${alpha})`;
+    ctx.fillText('PANIC!', canvas.width / 2, canvas.height / 2);
+}
+
+function drawHUD(ctx, s) {
+    const alive = players.filter(p => p.alive).length;
+    const fs = Math.floor(s * 3.5);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.font = `bold ${fs}px monospace`;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(4 * s, 4 * s, 52 * s, 8 * s);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`Alive: ${alive}/${players.length}`, 6 * s, 5 * s);
+}
+
+function drawElimFeed(ctx, s) {
+    const fs = Math.floor(s * 2.8);
+    ctx.font = `${fs}px monospace`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    for (let i = 0; i < elimFeed.length; i++) {
+        const e = elimFeed[i];
+        const age = frame - e.time;
+        const a = clamp(1 - age / 350, 0, 1);
+        const yy = canvas.height - (elimFeed.length - i) * fs * 1.5 - 4 * s;
+        ctx.fillStyle = `rgba(0,0,0,${a * 0.45})`;
+        ctx.fillRect(3 * s, yy - fs, 95 * s, fs * 1.3);
+        ctx.fillStyle = `rgba(255,150,50,${a})`;
+        ctx.fillText(e.msg, 5 * s, yy);
+    }
+}
+
+function drawTensionBorder(ctx, s) {
+    const alive = players.filter(p => p.alive).length;
+    if (alive > 3) return;
+    const pulse = Math.sin(frame * 0.12) * 0.5 + 0.5;
+    const a = pulse * lerp(0.2, 0.08, (alive - 1) / 2);
+    ctx.fillStyle = `rgba(255,0,0,${a})`;
+    const bw = 3 * s;
+    ctx.fillRect(0, 0, canvas.width, bw);
+    ctx.fillRect(0, canvas.height - bw, canvas.width, bw);
+    ctx.fillRect(0, 0, bw, canvas.height);
+    ctx.fillRect(canvas.width - bw, 0, bw, canvas.height);
+}
+
+function drawWinnerScreen(ctx, s) {
+    if (winnerTimer < 70) return;
+    const fadeIn = clamp((winnerTimer - 70) / 60, 0, 1);
+
+    ctx.fillStyle = `rgba(0,0,0,${fadeIn * 0.45})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+
+    if (winner) {
+        const lbl = Math.floor(s * 5);
+        ctx.font = `${lbl}px monospace`;
+        ctx.fillStyle = `rgba(200,200,200,${fadeIn})`;
+        ctx.fillText('NEXT FACILITATOR', canvas.width / 2, canvas.height * 0.28);
+
+        const nm = Math.floor(s * 14);
+        ctx.font = `bold ${nm}px monospace`;
+        ctx.fillStyle = `rgba(255,204,0,${fadeIn})`;
+        ctx.fillText(winner.name.toUpperCase(), canvas.width / 2, canvas.height * 0.44);
+
+        const em = Math.floor(s * 10);
+        ctx.font = `${em}px serif`;
+        ctx.fillText('\u{1F451}', canvas.width / 2, canvas.height * 0.6);
+    } else {
+        const lbl = Math.floor(s * 6);
+        ctx.font = `bold ${lbl}px monospace`;
+        ctx.fillStyle = `rgba(255,100,50,${fadeIn})`;
+        ctx.fillText('EVERYONE PERISHED!', canvas.width / 2, canvas.height * 0.4);
+        ctx.font = `${Math.floor(s * 4)}px monospace`;
+        ctx.fillStyle = `rgba(200,200,200,${fadeIn})`;
+        ctx.fillText('No facilitator chosen... run it again!', canvas.width / 2, canvas.height * 0.52);
+    }
+
+    if (winnerTimer > 200 && Math.floor(frame / 30) % 2 === 0) {
+        ctx.font = `bold ${Math.floor(s * 4)}px monospace`;
+        ctx.fillStyle = `rgba(255,255,255,${fadeIn})`;
+        ctx.fillText('CLICK TO PLAY AGAIN', canvas.width / 2, canvas.height * 0.88);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GAME LOOP & INPUT
+// ═══════════════════════════════════════════════════════════════
+function gameLoop() {
+    update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+canvas.addEventListener('click', () => {
+    if (state === 'title') {
+        initGame();
+    } else if (state === 'winner' && winnerTimer > 200) {
+        setupTitleScreen();
+    }
+});
+
+setupTitleScreen();
+gameLoop();
+</script>
+</body>
+</html>
